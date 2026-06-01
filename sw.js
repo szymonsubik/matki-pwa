@@ -1,4 +1,4 @@
-const CACHE_NAME = "matki-pwa-v8";
+const CACHE_NAME = "matki-pwa-v11";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -33,5 +33,39 @@ self.addEventListener("fetch", event => {
       caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
       return response;
     }).catch(() => caches.match(event.request).then(cached => cached || caches.match("./index.html")))
+  );
+});
+
+
+self.addEventListener("push", event => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = { title: "Matki pszczele", body: event.data ? event.data.text() : "Masz nowe przypomnienie." };
+  }
+
+  const title = payload.title || "Matki pszczele";
+  const options = {
+    body: payload.body || "Masz nowe przypomnienie w pasiece.",
+    icon: "icons/icon-192.png",
+    badge: "icons/icon-192.png",
+    tag: payload.tag || `matki-${Date.now()}`,
+    data: { url: payload.url || "./" }
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", event => {
+  event.notification.close();
+  const url = event.notification.data?.url || "./";
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then(clientList => {
+      for (const client of clientList) {
+        if ("focus" in client) return client.focus();
+      }
+      if (clients.openWindow) return clients.openWindow(url);
+    })
   );
 });

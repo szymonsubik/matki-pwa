@@ -7,8 +7,9 @@ const APIARY_CODE_KEY = "matki-pszczele-apiary-code";
 const SUPABASE_URL = "https://agmtwaawucvnpdkqhcex.supabase.co";
 const SUPABASE_KEY = "sb_publishable_DKZCU2PM4ea3gHcxqCOzsw_IiFjqvdd";
 const DEFAULT_APIARY_CODE = "subik-clifford-2026";
-const APP_VERSION = "v10";
+const APP_VERSION = "v11";
 const AUTO_REFRESH_MS = 30_000;
+const VAPID_PUBLIC_KEY = "BIFsrfZOYadNPP8UxL7qmmqGD5DZESIqCVkASNi-3Y42GEbaQ27wX5ATskpGS563ierE8jVhvYljmFsOuh3zQIs";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 let apiaryCode = normalizeApiaryCode(localStorage.getItem(APIARY_CODE_KEY) || DEFAULT_APIARY_CODE);
@@ -394,7 +395,7 @@ function cloudStatusText() {
   const last = lastCloudRefresh
     ? new Intl.DateTimeFormat("pl-PL", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(lastCloudRefresh)
     : "jeszcze nie";
-  return `Chmura działa · ${batches.length} partii · kod: ${apiaryCode} · auto co 30 s · ostatnio: ${last} · ${APP_VERSION}`;
+  return `Chmura działa · ${batches.length} partii · kod: ${apiaryCode} · auto co 30 s · ostatnio: ${last} · push ready · ${APP_VERSION}`;
 }
 
 function changeApiaryCode() {
@@ -514,11 +515,12 @@ function applyTone(element, event) {
 }
 
 async function registerServiceWorker() {
-  if (!("serviceWorker" in navigator)) return;
+  if (!("serviceWorker" in navigator)) return null;
   try {
-    await navigator.serviceWorker.register("sw.js");
+    return await navigator.serviceWorker.register("sw.js");
   } catch (error) {
     console.warn("Service worker nie został zarejestrowany", error);
+    return null;
   }
 }
 
@@ -537,17 +539,81 @@ async function requestNotifications() {
     alert("Ta przeglądarka nie obsługuje powiadomień webowych.");
     return;
   }
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    alert("Ta przeglądarka nie obsługuje Web Push. Na iPhonie otwórz aplikację z ikonki dodanej do ekranu początkowego.");
+    return;
+  }
 
   const permission = await Notification.requestPermission();
-  if (permission === "granted") {
-    maybeNotify("Powiadomienia włączone", "Na razie aplikacja przypomina po otwarciu. Pełne przypomnienia dodamy przez Google Calendar.");
-  } else {
+  if (permission !== "granted") {
     alert("Nie włączono powiadomień.");
+    return;
   }
+
+  const registration = await navigator.serviceWorker.ready;
+  let subscription = await registration.pushManager.getSubscription();
+  if (!subscription) {
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+    });
+  }
+
+  const saved = await savePushSubscription(subscription);
+  if (!saved) return;
+
+  maybeNotify("Powiadomienia włączone", "Telefon zapisany. Alerty: wygryzanie za 2 dni, jutro, dzisiaj, zasklepienie i histoliza.");
+}
+
+async function savePushSubscription(subscription) {
+  const json = subscription.toJSON();
+  const endpoint = json.endpoint || subscription.endpoint;
+  if (!endpoint) {
+    alert("Nie udało się odczytać endpointu powiadomień.");
+    return false;
+  }
+
+  const { error } = await supabase
+    .from("push_subscriptions")
+    .upsert({
+      endpoint,
+      apiary_code: normalizeApiaryCode(apiaryCode),
+      subscription: json,
+      user_agent: navigator.userAgent || null,
+      updated_at: new Date().toISOString()
+    }, { onConflict: "endpoint" });
+
+  if (error) {
+    console.error(error);
+    alert(`Nie udało się zapisać telefonu do powiadomień: ${error.message}. Sprawdź tabelę push_subscriptions w Supabase.`);
+    return false;
+  }
+  return true;
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
 }
 
 function maybeNotify(title, body) {
   if (!("Notification" in window)) return;
   if (Notification.permission !== "granted") return;
+  if (navigator.serviceWorker?.ready) {
+    navigator.serviceWorker.ready.then(registration => {
+      registration.showNotification(title, {
+        body,
+        icon: "icons/icon-192.png",
+        badge: "icons/icon-192.png",
+        tag: `matki-${Date.now()}`,
+        data: { url: "./" }
+      });
+    }).catch(() => new Notification(title, { body, icon: "icons/icon-192.png" }));
+    return;
+  }
   new Notification(title, { body, icon: "icons/icon-192.png" });
 }
