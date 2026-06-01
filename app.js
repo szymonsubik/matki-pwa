@@ -519,7 +519,9 @@ function applyTone(element, event) {
 async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return null;
   try {
-    const registration = await navigator.serviceWorker.register("./sw.js", { scope: "./" });
+    // Query string wymusza pobranie świeżego service workera po deployu na iOS.
+    const registration = await navigator.serviceWorker.register("./sw.js?v=14", { scope: "./" });
+    try { await registration.update(); } catch {}
     return registration;
   } catch (error) {
     console.warn("Service worker nie został zarejestrowany", error);
@@ -527,45 +529,51 @@ async function registerServiceWorker() {
   }
 }
 
-function waitForServiceWorkerActivation(registration, timeoutMs = 8000) {
-  return new Promise((resolve, reject) => {
-    if (!registration) {
-      reject(new Error("Nie udało się zarejestrować Service Workera."));
-      return;
-    }
+async function getActiveServiceWorkerRegistration(registration, timeoutMs = 12000) {
+  if (!registration) {
+    throw new Error("Nie udało się zarejestrować Service Workera.");
+  }
 
-    if (registration.active) {
-      resolve(registration);
-      return;
-    }
+  if (registration.active) return registration;
 
-    const worker = registration.installing || registration.waiting;
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      resolve(registration);
-    };
+  const worker = registration.installing || registration.waiting;
 
-    const timer = setTimeout(() => {
-      if (done) return;
-      done = true;
-      reject(new Error("Service Worker nie zdążył się aktywować. Zamknij aplikację, otwórz ją ponownie z ikonki i kliknij jeszcze raz."));
-    }, timeoutMs);
-
-    if (!worker) {
-      navigator.serviceWorker.ready.then(finish).catch(error => {
+  if (worker) {
+    await new Promise((resolve, reject) => {
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
         clearTimeout(timer);
-        reject(error);
-      });
-      return;
-    }
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        if (finished) return;
+        finished = true;
+        reject(new Error("Service Worker nie zdążył się aktywować."));
+      }, timeoutMs);
 
-    worker.addEventListener("statechange", () => {
-      if (worker.state === "activated") finish();
+      if (worker.state === "activated") {
+        finish();
+        return;
+      }
+      worker.addEventListener("statechange", () => {
+        if (worker.state === "activated") finish();
+        if (worker.state === "redundant") {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          reject(new Error("Service Worker został odrzucony przez przeglądarkę."));
+        }
+      });
     });
-  });
+  }
+
+  const fresh = await navigator.serviceWorker.getRegistration("./");
+  if (fresh?.active) return fresh;
+  if (registration.active) return registration;
+
+  throw new Error("Service Worker nadal nieaktywny. Zamknij aplikację całkowicie i otwórz ją z ikonki jeszcze raz.");
 }
 
 function collapseAllDetails() {
@@ -607,13 +615,10 @@ async function requestNotifications() {
 
     setPushStatus("Powiadomienia: czekam na aktywację Service Workera…");
     try {
-      registration = await Promise.race([
-        waitForServiceWorkerActivation(registration, 8000),
-        navigator.serviceWorker.ready
-      ]);
+      registration = await getActiveServiceWorkerRegistration(registration, 12000);
     } catch (swError) {
       setPushStatus(`Powiadomienia: Service Worker nieaktywny — ${swError.message}`);
-      alert("Zamknij aplikację całkowicie, otwórz ją ponownie z ikonki i kliknij Włącz powiadomienia jeszcze raz. To zwykle jest jednorazowe po aktualizacji.");
+      alert("Service Worker jeszcze się nie aktywował. Zamknij aplikację z przełącznika aplikacji, otwórz z ikonki i kliknij Włącz powiadomienia jeszcze raz. Jeśli nadal nie zadziała, użyj v14 z czystym Service Workerem.");
       return;
     }
 
