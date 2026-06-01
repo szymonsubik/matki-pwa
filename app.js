@@ -7,7 +7,7 @@ const APIARY_CODE_KEY = "matki-pszczele-apiary-code";
 const SUPABASE_URL = "https://agmtwaawucvnpdkqhcex.supabase.co";
 const SUPABASE_KEY = "sb_publishable_DKZCU2PM4ea3gHcxqCOzsw_IiFjqvdd";
 const DEFAULT_APIARY_CODE = "subik-clifford-2026";
-const APP_VERSION = "v11";
+const APP_VERSION = "v12";
 const AUTO_REFRESH_MS = 30_000;
 const VAPID_PUBLIC_KEY = "BIFsrfZOYadNPP8UxL7qmmqGD5DZESIqCVkASNi-3Y42GEbaQ27wX5ATskpGS563ierE8jVhvYljmFsOuh3zQIs";
 
@@ -75,6 +75,7 @@ const todayLabel = document.querySelector("#todayLabel");
 const notifyBtn = document.querySelector("#notifyBtn");
 const syncBtn = document.querySelector("#syncBtn");
 const cloudStatus = document.querySelector("#cloudStatus");
+const pushStatus = document.querySelector("#pushStatus");
 const apiaryCodeInput = document.querySelector("#apiaryCode");
 const apiaryCodeBtn = document.querySelector("#apiaryCodeBtn");
 const collapseAllBtn = document.querySelector("#collapseAllBtn");
@@ -94,6 +95,7 @@ async function init() {
   localStorage.setItem(APIARY_CODE_KEY, apiaryCode);
   render();
   setCloudStatus("Łączenie z chmurą…");
+  setPushStatus("Powiadomienia: gotowe do testu. Otwórz aplikację z ikonki na iPhonie.");
   await loadBatchesFromCloud();
 
   form.addEventListener("submit", onSubmit);
@@ -535,60 +537,105 @@ function scrollToTop() {
 }
 
 async function requestNotifications() {
-  if (!("Notification" in window)) {
-    alert("Ta przeglądarka nie obsługuje powiadomień webowych.");
-    return;
-  }
-  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-    alert("Ta przeglądarka nie obsługuje Web Push. Na iPhonie otwórz aplikację z ikonki dodanej do ekranu początkowego.");
-    return;
-  }
+  try {
+    const standalone = window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
+    setPushStatus(`Powiadomienia: start testu · tryb aplikacji: ${standalone ? "TAK" : "NIE"}`);
 
-  const permission = await Notification.requestPermission();
-  if (permission !== "granted") {
-    alert("Nie włączono powiadomień.");
-    return;
+    if (!("Notification" in window)) {
+      setPushStatus("Powiadomienia: błąd, przeglądarka nie obsługuje Notification API.");
+      alert("Ta przeglądarka nie obsługuje powiadomień webowych.");
+      return;
+    }
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      setPushStatus("Powiadomienia: błąd, brak Service Worker albo PushManager. Na iPhonie otwórz z ikonki aplikacji.");
+      alert("Ta przeglądarka nie obsługuje Web Push. Na iPhonie otwórz aplikację z ikonki dodanej do ekranu początkowego.");
+      return;
+    }
+
+    setPushStatus("Powiadomienia: proszę o zgodę iPhone’a…");
+    const permission = await Notification.requestPermission();
+    setPushStatus(`Powiadomienia: zgoda iPhone’a = ${permission}`);
+    if (permission !== "granted") {
+      alert("Nie włączono powiadomień.");
+      return;
+    }
+
+    setPushStatus("Powiadomienia: czekam na Service Worker…");
+    const registration = await navigator.serviceWorker.ready;
+
+    setPushStatus("Powiadomienia: tworzę subskrypcję urządzenia…");
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+    }
+
+    setPushStatus("Powiadomienia: zapisuję telefon do Supabase…");
+    const saved = await savePushSubscription(subscription);
+    if (!saved) return;
+
+    setPushStatus("Powiadomienia: telefon zapisany w Supabase. Możesz sprawdzić tabelę push_subscriptions.");
+    maybeNotify("Powiadomienia włączone", "Telefon zapisany. Alerty: wygryzanie za 2 dni, jutro, dzisiaj, zasklepienie i histoliza.");
+  } catch (error) {
+    console.error(error);
+    const message = error?.message || String(error);
+    setPushStatus(`Powiadomienia: błąd — ${message}`);
+    alert(`Błąd powiadomień: ${message}`);
   }
-
-  const registration = await navigator.serviceWorker.ready;
-  let subscription = await registration.pushManager.getSubscription();
-  if (!subscription) {
-    subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
-    });
-  }
-
-  const saved = await savePushSubscription(subscription);
-  if (!saved) return;
-
-  maybeNotify("Powiadomienia włączone", "Telefon zapisany. Alerty: wygryzanie za 2 dni, jutro, dzisiaj, zasklepienie i histoliza.");
 }
 
 async function savePushSubscription(subscription) {
   const json = subscription.toJSON();
   const endpoint = json.endpoint || subscription.endpoint;
   if (!endpoint) {
+    setPushStatus("Powiadomienia: błąd, brak endpointu subskrypcji.");
     alert("Nie udało się odczytać endpointu powiadomień.");
     return false;
   }
 
+  const row = {
+    endpoint,
+    apiary_code: normalizeApiaryCode(apiaryCode),
+    subscription: json,
+    user_agent: navigator.userAgent || null,
+    updated_at: new Date().toISOString()
+  };
+
   const { error } = await supabase
     .from("push_subscriptions")
-    .upsert({
-      endpoint,
-      apiary_code: normalizeApiaryCode(apiaryCode),
-      subscription: json,
-      user_agent: navigator.userAgent || null,
-      updated_at: new Date().toISOString()
-    }, { onConflict: "endpoint" });
+    .upsert(row, { onConflict: "endpoint" });
 
   if (error) {
     console.error(error);
+    setPushStatus(`Powiadomienia: błąd zapisu Supabase — ${error.message}`);
     alert(`Nie udało się zapisać telefonu do powiadomień: ${error.message}. Sprawdź tabelę push_subscriptions w Supabase.`);
     return false;
   }
+
+  const { data, error: readError } = await supabase
+    .from("push_subscriptions")
+    .select("endpoint, apiary_code, updated_at")
+    .eq("endpoint", endpoint)
+    .maybeSingle();
+
+  if (readError) {
+    console.error(readError);
+    setPushStatus(`Powiadomienia: zapis poszedł, ale odczyt kontrolny ma błąd — ${readError.message}`);
+    return true;
+  }
+  if (!data) {
+    setPushStatus("Powiadomienia: zapis wysłany, ale nie widzę rekordu po odczycie kontrolnym.");
+    alert("Zapis wysłany, ale aplikacja nie widzi rekordu w push_subscriptions. Sprawdź Supabase i odśwież tabelę.");
+    return false;
+  }
+  setPushStatus(`Powiadomienia: potwierdzony zapis w Supabase · kod ${data.apiary_code}`);
   return true;
+}
+
+function setPushStatus(message) {
+  if (pushStatus) pushStatus.textContent = message;
 }
 
 function urlBase64ToUint8Array(base64String) {
