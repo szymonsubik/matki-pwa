@@ -1,0 +1,24 @@
+{
+  "name": "Matki pszczele Subik x Clifford",
+  "short_name": "Subik x Clifford",
+  "description": "Kalendarz etapów wychowu i wygryzania matek pszczelich Subik x Clifford.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fff8e8",
+  "theme_color": "#f4b000",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

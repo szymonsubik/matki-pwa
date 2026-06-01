@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f4b000" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Subik x Clifford" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+  <title>Matki pszczele Subik x Clifford</title>
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">🐝 Kalendarz pasieczny</p>
+      <h1>Matki pszczele<br><span>Subik x Clifford</span></h1>
+    </div>
+    <button id="notifyBtn" class="ghost-btn" type="button">Powiadomienia</button>
+  </header>
+
+  <main class="layout">
+    <section class="panel add-panel" aria-labelledby="add-title">
+      <h2 id="add-title">Dodaj partię</h2>
+      <form id="batchForm" autocomplete="off">
+        <label>
+          Nazwa partii / ula
+          <input id="name" name="name" required placeholder="np. Ul 1 / seria A" />
+        </label>
+
+        <label>
+          Licz od
+          <select id="startType" name="startType">
+            <option value="izolacja">Izolacja matki na plastrze</option>
+            <option value="larwa">Przekładka larwy</option>
+            <option value="zasklepiony">Zasklepiony matecznik</option>
+            <option value="wygryzienie">Wygryzienie matki</option>
+          </select>
+        </label>
+
+        <label>
+          Data i godzina startu
+          <input id="startDate" name="startDate" type="datetime-local" required />
+        </label>
+
+        <label>
+          Liczba mateczników / matek
+          <input id="count" name="count" type="number" min="0" step="1" placeholder="np. 12" />
+        </label>
+
+        <label>
+          Notatka
+          <textarea id="notes" name="notes" rows="3" placeholder="np. ramka nr 3, rodzina wychowująca"></textarea>
+        </label>
+
+        <button class="primary-btn" type="submit">Dodaj partię</button>
+      </form>
+    </section>
+
+    <section class="panel" aria-labelledby="list-title">
+      <div class="section-head">
+        <div>
+          <h2 id="list-title">Aktywne partie</h2>
+          <p id="todayLabel" class="muted"></p>
+        </div>
+        <button id="demoBtn" class="ghost-btn" type="button">Dodaj przykład</button>
+      </div>
+      <div id="emptyState" class="empty-state">
+        <strong>Brak partii.</strong>
+        <span>Dodaj pierwszy ul/serię po lewej stronie.</span>
+      </div>
+      <div id="batches" class="batches"></div>
+    </section>
+  </main>
+
+  <footer class="footer-note">
+    Schemat dni jest roboczy. Dostosuj go do własnej metody hodowli, temperatury i wieku larwy. Wersja v6 iPhone fix.
+  </footer>
+
+  <template id="batchTemplate">
+    <article class="batch-card">
+      <div class="batch-top">
+        <div>
+          <h3 class="batch-name"></h3>
+          <p class="batch-meta"></p>
+        </div>
+        <button class="delete-btn" type="button" aria-label="Usuń partię">Usuń</button>
+      </div>
+      <div class="emergence-box">
+        <p>Wygryzanie matek</p>
+        <strong class="emergence-countdown"></strong>
+        <span class="emergence-date"></span>
+        <small class="emergence-day"></small>
+      </div>
+      <div class="next-box">
+        <p class="next-label"></p>
+        <strong class="next-title"></strong>
+        <span class="next-countdown"></span>
+        <small class="next-date"></small>
+      </div>
+      <ul class="main-events"></ul>
+      <button class="ghost-btn toggle-details" type="button">Rozwiń szczegóły</button>
+      <div class="details" hidden>
+        <ol class="timeline"></ol>
+        <p class="notes"></p>
+      </div>
+    </article>
+  </template>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>
