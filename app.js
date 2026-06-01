@@ -7,7 +7,7 @@ const APIARY_CODE_KEY = "matki-pszczele-apiary-code";
 const SUPABASE_URL = "https://agmtwaawucvnpdkqhcex.supabase.co";
 const SUPABASE_KEY = "sb_publishable_DKZCU2PM4ea3gHcxqCOzsw_IiFjqvdd";
 const DEFAULT_APIARY_CODE = "subik-clifford-2026";
-const APP_VERSION = "v12";
+const APP_VERSION = "v13";
 const AUTO_REFRESH_MS = 30_000;
 const VAPID_PUBLIC_KEY = "BIFsrfZOYadNPP8UxL7qmmqGD5DZESIqCVkASNi-3Y42GEbaQ27wX5ATskpGS563ierE8jVhvYljmFsOuh3zQIs";
 
@@ -519,11 +519,53 @@ function applyTone(element, event) {
 async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return null;
   try {
-    return await navigator.serviceWorker.register("sw.js");
+    const registration = await navigator.serviceWorker.register("./sw.js", { scope: "./" });
+    return registration;
   } catch (error) {
     console.warn("Service worker nie został zarejestrowany", error);
     return null;
   }
+}
+
+function waitForServiceWorkerActivation(registration, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    if (!registration) {
+      reject(new Error("Nie udało się zarejestrować Service Workera."));
+      return;
+    }
+
+    if (registration.active) {
+      resolve(registration);
+      return;
+    }
+
+    const worker = registration.installing || registration.waiting;
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(registration);
+    };
+
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      reject(new Error("Service Worker nie zdążył się aktywować. Zamknij aplikację, otwórz ją ponownie z ikonki i kliknij jeszcze raz."));
+    }, timeoutMs);
+
+    if (!worker) {
+      navigator.serviceWorker.ready.then(finish).catch(error => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      return;
+    }
+
+    worker.addEventListener("statechange", () => {
+      if (worker.state === "activated") finish();
+    });
+  });
 }
 
 function collapseAllDetails() {
@@ -560,8 +602,20 @@ async function requestNotifications() {
       return;
     }
 
-    setPushStatus("Powiadomienia: czekam na Service Worker…");
-    const registration = await navigator.serviceWorker.ready;
+    setPushStatus("Powiadomienia: rejestruję Service Worker…");
+    let registration = await registerServiceWorker();
+
+    setPushStatus("Powiadomienia: czekam na aktywację Service Workera…");
+    try {
+      registration = await Promise.race([
+        waitForServiceWorkerActivation(registration, 8000),
+        navigator.serviceWorker.ready
+      ]);
+    } catch (swError) {
+      setPushStatus(`Powiadomienia: Service Worker nieaktywny — ${swError.message}`);
+      alert("Zamknij aplikację całkowicie, otwórz ją ponownie z ikonki i kliknij Włącz powiadomienia jeszcze raz. To zwykle jest jednorazowe po aktualizacji.");
+      return;
+    }
 
     setPushStatus("Powiadomienia: tworzę subskrypcję urządzenia…");
     let subscription = await registration.pushManager.getSubscription();
@@ -651,7 +705,10 @@ function maybeNotify(title, body) {
   if (!("Notification" in window)) return;
   if (Notification.permission !== "granted") return;
   if (navigator.serviceWorker?.ready) {
-    navigator.serviceWorker.ready.then(registration => {
+    Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("SW timeout")), 3000))
+    ]).then(registration => {
       registration.showNotification(title, {
         body,
         icon: "icons/icon-192.png",
@@ -659,8 +716,10 @@ function maybeNotify(title, body) {
         tag: `matki-${Date.now()}`,
         data: { url: "./" }
       });
-    }).catch(() => new Notification(title, { body, icon: "icons/icon-192.png" }));
+    }).catch(() => {
+      try { new Notification(title, { body, icon: "icons/icon-192.png" }); } catch {}
+    });
     return;
   }
-  new Notification(title, { body, icon: "icons/icon-192.png" });
+  try { new Notification(title, { body, icon: "icons/icon-192.png" }); } catch {}
 }

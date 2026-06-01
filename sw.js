@@ -1,4 +1,4 @@
-const CACHE_NAME = "matki-pwa-v11";
+const CACHE_NAME = "matki-pwa-v13";
 const APP_SHELL = [
   "./",
   "./index.html",
