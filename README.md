@@ -28,3 +28,12 @@ Ta wersja ma tylko proste powiadomienie testowe po otwarciu aplikacji. Pełne po
 ## Dostosowanie dni
 
 Etapy są w pliku `app.js` w obiekcie `SCHEMES`.
+
+
+Wersja v8: poprawka synchronizacji kodu pasieki między urządzeniami, normalizacja myślników i cache.
+
+
+## v9
+- Automatyczne odświeżanie z Supabase co 30 sekund.
+- Status pokazuje godzinę ostatniego odświeżenia.
+- Zachowuje ręcznie rozwinięte szczegóły partii.

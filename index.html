@@ -18,11 +18,23 @@
       <p class="eyebrow">🐝 Kalendarz pasieczny</p>
       <h1>Matki pszczele<br><span>Subik x Clifford</span></h1>
     </div>
-    <button id="notifyBtn" class="ghost-btn" type="button">Powiadomienia</button>
+    <div class="header-actions">
+      <button id="syncBtn" class="ghost-btn" type="button">Odśwież</button>
+      <button id="notifyBtn" class="ghost-btn" type="button">Powiadomienia</button>
+    </div>
   </header>
 
   <main class="layout">
     <section class="panel add-panel" aria-labelledby="add-title">
+      <div class="cloud-box">
+        <strong>Synchronizacja</strong>
+        <p id="cloudStatus">Chmura: start</p>
+        <label>
+          Kod pasieki
+          <input id="apiaryCode" name="apiaryCode" autocomplete="off" />
+        </label>
+        <button id="apiaryCodeBtn" class="ghost-btn" type="button">Ustaw kod</button>
+      </div>
       <h2 id="add-title">Dodaj partię</h2>
       <form id="batchForm" autocomplete="off">
         <label>
@@ -65,18 +77,21 @@
           <h2 id="list-title">Aktywne partie</h2>
           <p id="todayLabel" class="muted"></p>
         </div>
-        <button id="demoBtn" class="ghost-btn" type="button">Dodaj przykład</button>
       </div>
       <div id="emptyState" class="empty-state">
         <strong>Brak partii.</strong>
         <span>Dodaj pierwszy ul/serię po lewej stronie.</span>
       </div>
       <div id="batches" class="batches"></div>
+      <div class="bottom-actions" aria-label="Szybkie akcje">
+        <button id="collapseAllBtn" class="ghost-btn" type="button">Zwiń wszystkie szczegóły</button>
+        <button id="topBtn" class="primary-btn small-primary" type="button">Wróć do góry</button>
+      </div>
     </section>
   </main>
 
   <footer class="footer-note">
-    Schemat dni jest roboczy. Dostosuj go do własnej metody hodowli, temperatury i wieku larwy. Wersja v6 iPhone fix.
+    Schemat dni jest roboczy. Dostosuj go do własnej metody hodowli, temperatury i wieku larwy. Wersja v10 · synchronizacja Supabase · autoodświeżanie co 30 sekund.
   </footer>
 
   <template id="batchTemplate">

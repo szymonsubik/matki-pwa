@@ -1,5 +1,17 @@
-const STORAGE_KEY = "matki-pszczele-batches-v4";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const STORAGE_KEY = "matki-pszczele-batches-v7-cache";
 const EXPANDED_KEY = "matki-pszczele-expanded-v1";
+const APIARY_CODE_KEY = "matki-pszczele-apiary-code";
+
+const SUPABASE_URL = "https://agmtwaawucvnpdkqhcex.supabase.co";
+const SUPABASE_KEY = "sb_publishable_DKZCU2PM4ea3gHcxqCOzsw_IiFjqvdd";
+const DEFAULT_APIARY_CODE = "subik-clifford-2026";
+const APP_VERSION = "v10";
+const AUTO_REFRESH_MS = 30_000;
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+let apiaryCode = normalizeApiaryCode(localStorage.getItem(APIARY_CODE_KEY) || DEFAULT_APIARY_CODE);
 
 const SCHEMES = {
   izolacja: {
@@ -59,32 +71,55 @@ const batchesEl = document.querySelector("#batches");
 const template = document.querySelector("#batchTemplate");
 const emptyState = document.querySelector("#emptyState");
 const todayLabel = document.querySelector("#todayLabel");
-const demoBtn = document.querySelector("#demoBtn");
 const notifyBtn = document.querySelector("#notifyBtn");
+const syncBtn = document.querySelector("#syncBtn");
+const cloudStatus = document.querySelector("#cloudStatus");
+const apiaryCodeInput = document.querySelector("#apiaryCode");
+const apiaryCodeBtn = document.querySelector("#apiaryCodeBtn");
+const collapseAllBtn = document.querySelector("#collapseAllBtn");
+const topBtn = document.querySelector("#topBtn");
 
-let batches = loadBatches();
+let batches = loadCachedBatches();
 const expandedBatchIds = loadExpandedState();
+let isSyncing = false;
+let lastCloudRefresh = null;
 
 init();
 
-function init() {
+async function init() {
   setDefaultDate();
   registerServiceWorker();
+  apiaryCodeInput.value = apiaryCode;
+  localStorage.setItem(APIARY_CODE_KEY, apiaryCode);
   render();
+  setCloudStatus("Łączenie z chmurą…");
+  await loadBatchesFromCloud();
+
   form.addEventListener("submit", onSubmit);
-  demoBtn.addEventListener("click", addDemo);
   notifyBtn.addEventListener("click", requestNotifications);
-  setInterval(render, 60_000);
+  syncBtn.addEventListener("click", loadBatchesFromCloud);
+  apiaryCodeBtn.addEventListener("click", changeApiaryCode);
+  collapseAllBtn.addEventListener("click", collapseAllDetails);
+  topBtn.addEventListener("click", scrollToTop);
+  window.addEventListener("focus", loadBatchesFromCloud);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) loadBatchesFromCloud();
+  });
+  setInterval(() => {
+    render();
+    loadBatchesFromCloud({ quiet: true, auto: true });
+  }, AUTO_REFRESH_MS);
 }
 
-function onSubmit(event) {
+async function onSubmit(event) {
   event.preventDefault();
   const formData = new FormData(form);
+  const parsedDate = parseLocalDateTime(String(formData.get("startDate") || ""));
   const batch = {
     id: createId(),
     name: String(formData.get("name") || "").trim(),
     startType: String(formData.get("startType") || "larwa"),
-    startDate: parseLocalDateTime(String(formData.get("startDate") || "")).toISOString(),
+    startDate: parsedDate.toISOString(),
     count: String(formData.get("count") || "").trim(),
     notes: String(formData.get("notes") || "").trim(),
     createdAt: new Date().toISOString()
@@ -99,34 +134,102 @@ function onSubmit(event) {
     return;
   }
 
+  const original = [...batches];
   batches.push(batch);
-  try {
-    saveBatches();
-  } catch (error) {
-    alert("Nie udało się zapisać partii w pamięci Safari. Sprawdź, czy nie używasz trybu prywatnego.");
+  saveCachedBatches();
+  render();
+
+  const saved = await saveBatchToCloud(batch);
+  if (!saved) {
+    batches = original;
+    saveCachedBatches();
+    render();
     return;
   }
+
   form.reset();
   setDefaultDate();
-  render();
-  maybeNotify("Dodano partię", `${batch.name}: harmonogram jest gotowy.`);
+  maybeNotify("Dodano partię", `${batch.name}: harmonogram jest zapisany w chmurze.`);
 }
 
-function addDemo() {
+async function addDemo() {
   const start = new Date();
   start.setDate(start.getDate() - 3);
   start.setHours(9, 0, 0, 0);
-  batches.push({
+  const batch = {
     id: createId(),
     name: "Ul 1 / seria testowa",
     startType: "larwa",
     startDate: start.toISOString(),
     count: "12",
-    notes: "Przykład do sprawdzenia działania aplikacji.",
+    notes: "Przykład do sprawdzenia synchronizacji między urządzeniami.",
     createdAt: new Date().toISOString()
-  });
-  saveBatches();
+  };
+  batches.push(batch);
+  saveCachedBatches();
   render();
+  await saveBatchToCloud(batch);
+}
+
+async function loadBatchesFromCloud(options = {}) {
+  if (isSyncing) return false;
+  isSyncing = true;
+  if (!options.quiet) setCloudStatus("Odświeżam z chmury…");
+
+  const { data, error } = await supabase
+    .from("parties")
+    .select("id, apiary_code, name, scheme, start_at, count, note, created_at")
+    .order("start_at", { ascending: true });
+
+  isSyncing = false;
+
+  if (error) {
+    console.error(error);
+    setCloudStatus("Chmura: błąd. Sprawdź tabelę parties i zasady RLS.", true);
+    return false;
+  }
+
+  const normalizedCode = normalizeApiaryCode(apiaryCode);
+  batches = (data || [])
+    .filter(row => normalizeApiaryCode(row.apiary_code || "") === normalizedCode)
+    .map(fromDbRow);
+  saveCachedBatches();
+  render();
+  lastCloudRefresh = new Date();
+  setCloudStatus(cloudStatusText());
+  return true;
+}
+
+async function saveBatchToCloud(batch) {
+  setCloudStatus("Zapisuję w chmurze…");
+  const { error } = await supabase
+    .from("parties")
+    .upsert(toDbRow(batch), { onConflict: "id" });
+
+  if (error) {
+    console.error(error);
+    alert(`Nie udało się zapisać w Supabase: ${error.message}`);
+    setCloudStatus("Chmura: błąd zapisu", true);
+    return false;
+  }
+
+  await loadBatchesFromCloud({ quiet: true });
+  return true;
+}
+
+async function deleteBatchFromCloud(batch) {
+  const { error } = await supabase
+    .from("parties")
+    .delete()
+    .eq("id", batch.id)
+    .eq("apiary_code", apiaryCode);
+
+  if (error) {
+    console.error(error);
+    alert(`Nie udało się usunąć z Supabase: ${error.message}`);
+    return false;
+  }
+  return true;
 }
 
 function render() {
@@ -194,11 +297,8 @@ function renderBatch(batch) {
   toggle.addEventListener("click", () => {
     const isHidden = details.hidden;
     details.hidden = !isHidden;
-    if (isHidden) {
-      expandedBatchIds.add(batch.id);
-    } else {
-      expandedBatchIds.delete(batch.id);
-    }
+    if (isHidden) expandedBatchIds.add(batch.id);
+    else expandedBatchIds.delete(batch.id);
     saveExpandedState();
     toggle.textContent = isHidden ? "Zwiń szczegóły" : "Rozwiń szczegóły";
   });
@@ -232,17 +332,90 @@ function renderBatch(batch) {
   notes.textContent = batch.notes ? `Notatka: ${batch.notes}` : "";
   notes.hidden = !batch.notes;
 
-  node.querySelector(".delete-btn").addEventListener("click", () => {
+  node.querySelector(".delete-btn").addEventListener("click", async () => {
     const ok = confirm(`Usunąć partię „${batch.name}”?`);
     if (!ok) return;
+    const previous = [...batches];
     batches = batches.filter(item => item.id !== batch.id);
     expandedBatchIds.delete(batch.id);
     saveExpandedState();
-    saveBatches();
+    saveCachedBatches();
     render();
+
+    const deleted = await deleteBatchFromCloud(batch);
+    if (!deleted) {
+      batches = previous;
+      saveCachedBatches();
+      render();
+      return;
+    }
+    await loadBatchesFromCloud({ quiet: true });
   });
 
   return node;
+}
+
+function toDbRow(batch) {
+  return {
+    id: batch.id,
+    apiary_code: normalizeApiaryCode(apiaryCode),
+    name: batch.name,
+    scheme: batch.startType,
+    start_at: batch.startDate,
+    count: batch.count ? Number(batch.count) : null,
+    note: batch.notes || null,
+    created_at: batch.createdAt || new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+}
+
+function fromDbRow(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    startType: row.scheme || "larwa",
+    startDate: row.start_at,
+    count: row.count === null || row.count === undefined ? "" : String(row.count),
+    notes: row.note || "",
+    createdAt: row.created_at || new Date().toISOString()
+  };
+}
+
+function normalizeApiaryCode(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2212]/g, "-")
+    .replace(/\s*[-]\s*/g, "-")
+    .replace(/\s+/g, "-");
+}
+
+function cloudStatusText() {
+  const last = lastCloudRefresh
+    ? new Intl.DateTimeFormat("pl-PL", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(lastCloudRefresh)
+    : "jeszcze nie";
+  return `Chmura działa · ${batches.length} partii · kod: ${apiaryCode} · auto co 30 s · ostatnio: ${last} · ${APP_VERSION}`;
+}
+
+function changeApiaryCode() {
+  const next = normalizeApiaryCode(apiaryCodeInput.value);
+  if (!next) {
+    alert("Wpisz kod pasieki.");
+    return;
+  }
+  apiaryCode = next;
+  apiaryCodeInput.value = apiaryCode;
+  localStorage.setItem(APIARY_CODE_KEY, apiaryCode);
+  batches = [];
+  saveCachedBatches();
+  render();
+  loadBatchesFromCloud();
+}
+
+function setCloudStatus(text, isError = false) {
+  if (!cloudStatus) return;
+  cloudStatus.textContent = text;
+  cloudStatus.classList.toggle("error", Boolean(isError));
 }
 
 function getEmergenceDate(batch) {
@@ -282,33 +455,27 @@ function addDays(date, days) {
   return copy;
 }
 
-
 function createId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `batch-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function parseLocalDateTime(value) {
-  // Safari na iPhonie bywa kapryśne przy parsowaniu datetime-local, więc składamy datę ręcznie.
   const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
   if (!match) return new Date(NaN);
   const [, y, m, d, h, min] = match.map(Number);
   return new Date(y, m - 1, d, h, min, 0, 0);
 }
 
-function loadBatches() {
+function loadCachedBatches() {
   try {
-    const current = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-    if (current.length) return current;
-    const previous = JSON.parse(localStorage.getItem("matki-pszczele-batches-v2") || "[]");
-    if (previous.length) return previous;
-    return JSON.parse(localStorage.getItem("matki-pszczele-batches-v1") || "[]");
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
   } catch {
     return [];
   }
 }
 
-function saveBatches() {
+function saveCachedBatches() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(batches));
 }
 
@@ -355,6 +522,16 @@ async function registerServiceWorker() {
   }
 }
 
+function collapseAllDetails() {
+  expandedBatchIds.clear();
+  saveExpandedState();
+  render();
+}
+
+function scrollToTop() {
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
 async function requestNotifications() {
   if (!("Notification" in window)) {
     alert("Ta przeglądarka nie obsługuje powiadomień webowych.");
@@ -363,7 +540,7 @@ async function requestNotifications() {
 
   const permission = await Notification.requestPermission();
   if (permission === "granted") {
-    maybeNotify("Powiadomienia włączone", "Na razie aplikacja przypomina po otwarciu. Pełne push dodamy w kolejnym etapie.");
+    maybeNotify("Powiadomienia włączone", "Na razie aplikacja przypomina po otwarciu. Pełne przypomnienia dodamy przez Google Calendar.");
   } else {
     alert("Nie włączono powiadomień.");
   }
