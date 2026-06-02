@@ -7,7 +7,7 @@ const APIARY_CODE_KEY = "matki-pszczele-apiary-code";
 const SUPABASE_URL = "https://agmtwaawucvnpdkqhcex.supabase.co";
 const SUPABASE_KEY = "sb_publishable_DKZCU2PM4ea3gHcxqCOzsw_IiFjqvdd";
 const DEFAULT_APIARY_CODE = "subik-clifford-2026";
-const APP_VERSION = "v13";
+const APP_VERSION = "v15";
 const AUTO_REFRESH_MS = 30_000;
 const VAPID_PUBLIC_KEY = "BIFsrfZOYadNPP8UxL7qmmqGD5DZESIqCVkASNi-3Y42GEbaQ27wX5ATskpGS563ierE8jVhvYljmFsOuh3zQIs";
 
@@ -520,7 +520,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return null;
   try {
     // Query string wymusza pobranie świeżego service workera po deployu na iOS.
-    const registration = await navigator.serviceWorker.register("./sw.js?v=14", { scope: "./" });
+    const registration = await navigator.serviceWorker.register("./sw.js?v=15", { scope: "./" });
     try { await registration.update(); } catch {}
     return registration;
   } catch (error) {
@@ -618,7 +618,7 @@ async function requestNotifications() {
       registration = await getActiveServiceWorkerRegistration(registration, 12000);
     } catch (swError) {
       setPushStatus(`Powiadomienia: Service Worker nieaktywny — ${swError.message}`);
-      alert("Service Worker jeszcze się nie aktywował. Zamknij aplikację z przełącznika aplikacji, otwórz z ikonki i kliknij Włącz powiadomienia jeszcze raz. Jeśli nadal nie zadziała, użyj v14 z czystym Service Workerem.");
+      alert("Service Worker jeszcze się nie aktywował. Zamknij aplikację z przełącznika aplikacji, otwórz z ikonki i kliknij Włącz powiadomienia jeszcze raz. Jeśli nadal nie zadziała, użyj v15 z czystym Service Workerem.");
       return;
     }
 
