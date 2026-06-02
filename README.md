@@ -1,3 +1,3 @@
-Matki pszczele Subik x Clifford — v15 cache fix
+Matki pszczele Subik x Clifford — v16
 
-Wersja z wymuszonym odświeżeniem plików app.js przez query string i APP_VERSION=v15.
+Wersja z możliwością ustawienia godziny powiadomień oraz bez roboczych komunikatów w aplikacji.

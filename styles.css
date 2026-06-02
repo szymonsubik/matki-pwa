@@ -460,6 +460,17 @@ button {
   padding: 8px 12px;
   font-size: 0.9rem;
 }
+.notification-settings {
+  border-top: 1px dashed rgba(90, 55, 10, 0.18);
+  padding-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.notification-settings label {
+  font-size: 0.85rem;
+}
+
 
 .bottom-actions {
   display: flex;

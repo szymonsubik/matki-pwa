@@ -7,9 +7,10 @@ const APIARY_CODE_KEY = "matki-pszczele-apiary-code";
 const SUPABASE_URL = "https://agmtwaawucvnpdkqhcex.supabase.co";
 const SUPABASE_KEY = "sb_publishable_DKZCU2PM4ea3gHcxqCOzsw_IiFjqvdd";
 const DEFAULT_APIARY_CODE = "subik-clifford-2026";
-const APP_VERSION = "v15";
+const APP_VERSION = "v16";
 const AUTO_REFRESH_MS = 30_000;
 const VAPID_PUBLIC_KEY = "BIFsrfZOYadNPP8UxL7qmmqGD5DZESIqCVkASNi-3Y42GEbaQ27wX5ATskpGS563ierE8jVhvYljmFsOuh3zQIs";
+const DEFAULT_NOTIFICATION_TIME = "08:00";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 let apiaryCode = normalizeApiaryCode(localStorage.getItem(APIARY_CODE_KEY) || DEFAULT_APIARY_CODE);
@@ -80,11 +81,15 @@ const apiaryCodeInput = document.querySelector("#apiaryCode");
 const apiaryCodeBtn = document.querySelector("#apiaryCodeBtn");
 const collapseAllBtn = document.querySelector("#collapseAllBtn");
 const topBtn = document.querySelector("#topBtn");
+const notificationTimeInput = document.querySelector("#notificationTime");
+const notificationTimeBtn = document.querySelector("#notificationTimeBtn");
+const notificationTimeStatus = document.querySelector("#notificationTimeStatus");
 
 let batches = loadCachedBatches();
 const expandedBatchIds = loadExpandedState();
 let isSyncing = false;
 let lastCloudRefresh = null;
+let notificationTime = DEFAULT_NOTIFICATION_TIME;
 
 init();
 
@@ -93,9 +98,11 @@ async function init() {
   registerServiceWorker();
   apiaryCodeInput.value = apiaryCode;
   localStorage.setItem(APIARY_CODE_KEY, apiaryCode);
+  if (notificationTimeInput) notificationTimeInput.value = notificationTime;
   render();
   setCloudStatus("Łączenie z chmurą…");
-  setPushStatus("Powiadomienia: gotowe do testu. Otwórz aplikację z ikonki na iPhonie.");
+  setPushStatus("Powiadomienia: gotowe. Otwórz aplikację z ikonki na iPhonie.");
+  await loadNotificationSettings();
   await loadBatchesFromCloud();
 
   form.addEventListener("submit", onSubmit);
@@ -104,6 +111,7 @@ async function init() {
   apiaryCodeBtn.addEventListener("click", changeApiaryCode);
   collapseAllBtn.addEventListener("click", collapseAllDetails);
   topBtn.addEventListener("click", scrollToTop);
+  notificationTimeBtn?.addEventListener("click", saveNotificationSettings);
   window.addEventListener("focus", loadBatchesFromCloud);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) loadBatchesFromCloud();
@@ -161,11 +169,11 @@ async function addDemo() {
   start.setHours(9, 0, 0, 0);
   const batch = {
     id: createId(),
-    name: "Ul 1 / seria testowa",
+    name: "Ul 1 / seria A",
     startType: "larwa",
     startDate: start.toISOString(),
     count: "12",
-    notes: "Przykład do sprawdzenia synchronizacji między urządzeniami.",
+    notes: "Przykład synchronizacji między urządzeniami.",
     createdAt: new Date().toISOString()
   };
   batches.push(batch);
@@ -397,10 +405,10 @@ function cloudStatusText() {
   const last = lastCloudRefresh
     ? new Intl.DateTimeFormat("pl-PL", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(lastCloudRefresh)
     : "jeszcze nie";
-  return `Chmura działa · ${batches.length} partii · kod: ${apiaryCode} · auto co 30 s · ostatnio: ${last} · push ready · ${APP_VERSION}`;
+  return `Chmura działa · ${batches.length} partii · kod: ${apiaryCode} · auto co 30 s · ostatnio: ${last} · ${APP_VERSION}`;
 }
 
-function changeApiaryCode() {
+async function changeApiaryCode() {
   const next = normalizeApiaryCode(apiaryCodeInput.value);
   if (!next) {
     alert("Wpisz kod pasieki.");
@@ -409,10 +417,14 @@ function changeApiaryCode() {
   apiaryCode = next;
   apiaryCodeInput.value = apiaryCode;
   localStorage.setItem(APIARY_CODE_KEY, apiaryCode);
+  notificationTime = DEFAULT_NOTIFICATION_TIME;
+  if (notificationTimeInput) notificationTimeInput.value = notificationTime;
+  if (notificationTimeStatus) notificationTimeStatus.textContent = "Ładuję ustawienia powiadomień…";
   batches = [];
   saveCachedBatches();
   render();
-  loadBatchesFromCloud();
+  await loadBatchesFromCloud();
+  await loadNotificationSettings();
 }
 
 function setCloudStatus(text, isError = false) {
@@ -576,6 +588,80 @@ async function getActiveServiceWorkerRegistration(registration, timeoutMs = 1200
   throw new Error("Service Worker nadal nieaktywny. Zamknij aplikację całkowicie i otwórz ją z ikonki jeszcze raz.");
 }
 
+async function loadNotificationSettings() {
+  if (!notificationTimeInput || !notificationTimeStatus) return;
+  const normalizedCode = normalizeApiaryCode(apiaryCode);
+  const { data, error } = await supabase
+    .from("notification_settings")
+    .select("notify_hour, notify_minute")
+    .eq("apiary_code", normalizedCode)
+    .maybeSingle();
+
+  if (error && error.code !== "PGRST116") {
+    console.warn("notification settings load", error);
+    notificationTime = DEFAULT_NOTIFICATION_TIME;
+    notificationTimeInput.value = notificationTime;
+    notificationTimeStatus.textContent = "Godzina powiadomień: 08:00. Jeśli nie zapisuje, uruchom SQL z v16.";
+    return;
+  }
+
+  if (data && Number.isInteger(data.notify_hour)) {
+    notificationTime = formatTimeValue(data.notify_hour, data.notify_minute ?? 0);
+  } else {
+    notificationTime = DEFAULT_NOTIFICATION_TIME;
+  }
+  notificationTimeInput.value = notificationTime;
+  notificationTimeStatus.textContent = `Godzina powiadomień: ${notificationTime}`;
+}
+
+async function saveNotificationSettings() {
+  if (!notificationTimeInput || !notificationTimeStatus) return;
+  const parsed = parseTimeValue(notificationTimeInput.value || DEFAULT_NOTIFICATION_TIME);
+  if (!parsed) {
+    alert("Ustaw poprawną godzinę powiadomień.");
+    return;
+  }
+
+  notificationTime = formatTimeValue(parsed.hour, parsed.minute);
+  notificationTimeInput.value = notificationTime;
+  notificationTimeStatus.textContent = "Zapisuję godzinę powiadomień…";
+
+  const row = {
+    apiary_code: normalizeApiaryCode(apiaryCode),
+    notify_hour: parsed.hour,
+    notify_minute: parsed.minute,
+    timezone: "Europe/Warsaw",
+    updated_at: new Date().toISOString()
+  };
+
+  const { error } = await supabase
+    .from("notification_settings")
+    .upsert(row, { onConflict: "apiary_code" });
+
+  if (error) {
+    console.error(error);
+    notificationTimeStatus.textContent = `Błąd zapisu godziny: ${error.message}`;
+    alert(`Nie udało się zapisać godziny powiadomień: ${error.message}`);
+    return;
+  }
+
+  notificationTimeStatus.textContent = `Godzina powiadomień: ${notificationTime}`;
+}
+
+function parseTimeValue(value) {
+  const match = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return null;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return { hour, minute };
+}
+
+function formatTimeValue(hour, minute) {
+  return `${String(hour).padStart(2, "0")}:${String(minute || 0).padStart(2, "0")}`;
+}
+
 function collapseAllDetails() {
   expandedBatchIds.clear();
   saveExpandedState();
@@ -589,7 +675,7 @@ function scrollToTop() {
 async function requestNotifications() {
   try {
     const standalone = window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
-    setPushStatus(`Powiadomienia: start testu · tryb aplikacji: ${standalone ? "TAK" : "NIE"}`);
+    setPushStatus(`Powiadomienia: uruchamiam · tryb aplikacji: ${standalone ? "TAK" : "NIE"}`);
 
     if (!("Notification" in window)) {
       setPushStatus("Powiadomienia: błąd, przeglądarka nie obsługuje Notification API.");
@@ -618,7 +704,7 @@ async function requestNotifications() {
       registration = await getActiveServiceWorkerRegistration(registration, 12000);
     } catch (swError) {
       setPushStatus(`Powiadomienia: Service Worker nieaktywny — ${swError.message}`);
-      alert("Service Worker jeszcze się nie aktywował. Zamknij aplikację z przełącznika aplikacji, otwórz z ikonki i kliknij Włącz powiadomienia jeszcze raz. Jeśli nadal nie zadziała, użyj v15 z czystym Service Workerem.");
+      alert("Service Worker jeszcze się nie aktywował. Zamknij aplikację z przełącznika aplikacji, otwórz z ikonki i kliknij Włącz powiadomienia jeszcze raz.");
       return;
     }
 
@@ -635,7 +721,7 @@ async function requestNotifications() {
     const saved = await savePushSubscription(subscription);
     if (!saved) return;
 
-    setPushStatus("Powiadomienia: telefon zapisany w Supabase. Możesz sprawdzić tabelę push_subscriptions.");
+    setPushStatus("Powiadomienia: telefon zapisany. Alerty są aktywne.");
     maybeNotify("Powiadomienia włączone", "Telefon zapisany. Alerty: wygryzanie za 2 dni, jutro, dzisiaj, zasklepienie i histoliza.");
   } catch (error) {
     console.error(error);

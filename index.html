@@ -34,7 +34,15 @@
           <input id="apiaryCode" name="apiaryCode" autocomplete="off" />
         </label>
         <button id="apiaryCodeBtn" class="ghost-btn" type="button">Ustaw kod</button>
-        <p id="pushStatus" class="muted">Powiadomienia: nie sprawdzono</p>
+        <p id="pushStatus" class="muted">Powiadomienia: gotowe</p>
+        <div class="notification-settings">
+          <label>
+            Godzina powiadomień
+            <input id="notificationTime" name="notificationTime" type="time" step="3600" value="08:00" />
+          </label>
+          <button id="notificationTimeBtn" class="ghost-btn" type="button">Zapisz godzinę</button>
+          <p id="notificationTimeStatus" class="muted">Domyślnie: 08:00</p>
+        </div>
       </div>
       <h2 id="add-title">Dodaj partię</h2>
       <form id="batchForm" autocomplete="off">
@@ -92,7 +100,7 @@
   </main>
 
   <footer class="footer-note">
-    Schemat dni jest roboczy. Dostosuj go do własnej metody hodowli, temperatury i wieku larwy. Wersja v12 · synchronizacja Supabase · autoodświeżanie co 30 sekund · diagnostyka Web Push.
+    Schemat dni jest roboczy. Dostosuj go do własnej metody hodowli, temperatury i wieku larwy. Wersja v16 · synchronizacja Supabase · autoodświeżanie co 30 sekund · powiadomienia PWA.
   </footer>
 
   <template id="batchTemplate">
@@ -125,6 +133,6 @@
     </article>
   </template>
 
-  <script src="app.js?v=15" type="module"></script>
+  <script src="app.js?v=16" type="module"></script>
 </body>
 </html>
